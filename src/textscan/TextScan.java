@@ -53,17 +53,46 @@ public class TextScan {
         
         List<Rect> top5Rectangles = filteredRectangles.stream().limit(6).collect(Collectors.toList());
         
-        for (Rect rect : top5Rectangles) {
-            Imgproc.rectangle(original, rect.tl(), rect.br(), new Scalar(0, 255, 0), 2);
-        }
+        List<Rect> answersRectangles = new ArrayList<>();
         
         for (int i = 1; i < 5; i++) {
             if (top5Rectangles.size() > 1) {
-                Rect subRect = top5Rectangles.get(i);
-                Mat cropped = invertedImage.submat(subRect);
-
-                answerDetection(cropped, original);
+                answersRectangles.add(top5Rectangles.get(i));
             }
+        }
+        
+        answersRectangles.sort(Comparator.comparingInt(rect -> rect.x));
+        
+        for (Rect rect : answersRectangles) {
+            Mat cropped = invertedImage.submat(rect);
+            
+            Imgproc.rectangle(original, rect.tl(), rect.br(), new Scalar(0, 255, 0), 2);
+            
+            answerDetection(cropped, original);
+        }
+        
+        List<Rect> idRectangle = new ArrayList<>();
+        
+        idRectangle.add(top5Rectangles.get(0));
+        
+        for (Rect rect : idRectangle) {
+            Mat cropped = invertedImage.submat(rect);
+
+            Imgproc.rectangle(original, rect.tl(), rect.br(), new Scalar(0, 255, 255), 2);
+            
+            idDetection(cropped, original);
+        }
+        
+        List<Rect> codeRectangle = new ArrayList<>();
+        
+        codeRectangle.add(top5Rectangles.get(5));
+        
+        for (Rect rect : codeRectangle) {
+            Mat cropped = invertedImage.submat(rect);
+
+            Imgproc.rectangle(original, rect.tl(), rect.br(), new Scalar(0, 0, 255), 2);
+            
+            examCodeDetection(cropped, original);
         }
         
         Imgcodecs.imwrite("output.png", original);
@@ -118,7 +147,7 @@ public class TextScan {
 
             List<Circle> uniqueCircles = filterOverlappingCircles(detectedCircles);
             
-            List<Rect> detectedRect = new ArrayList<>();
+//            List<Rect> detectedRect = new ArrayList<>();
             
             uniqueCircles.sort(Comparator.comparingInt(c -> c.x));
             
@@ -134,7 +163,7 @@ public class TextScan {
                 int squareY = circle.y - circle.radius;
 
                 Rect squareCircle = new Rect(squareX, squareY, squareSide, squareSide);
-                detectedRect.add(squareCircle);
+//                detectedRect.add(squareCircle);
 
                 Mat squareROI = cropped.submat(squareCircle);
                 
@@ -173,14 +202,246 @@ public class TextScan {
     }
     
     private void idDetection(Mat cropped, Mat original) {
+        List<MatOfPoint> contours = new ArrayList<>();
+        ArrayList<String> DNIletters = new ArrayList<>();
+        
+        ArrayList<String> DNInumbers = new ArrayList<>();
+        
+        Mat hierarchy = new Mat();
+
+        Imgproc.findContours(cropped, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE);
+
+        List<Rect> rectangles = contours.stream()
+                .map(Imgproc::boundingRect)
+                .filter(rect -> rect.width < rect.height)
+                .sorted((r1, r2) -> Integer.compare(r2.width * r2.height, r1.width * r1.height))
+                .limit(3)
+                .sorted(Comparator.comparingInt(r -> r.x))
+                .collect(Collectors.toList());
+        
+        for (Rect rect : rectangles) {
+            Imgproc.rectangle(original, rect.tl(), rect.br(), new Scalar(255, 0, 255), 2);
+        }
+        
+        List<Rect> lettersRectangle = new ArrayList<>();
+        
+        lettersRectangle.add(rectangles.get(0));
+        lettersRectangle.add(rectangles.get(2));
+        
+        for (Rect rect : lettersRectangle) {
+
+            Mat roi = cropped.submat(rect);
+
+            Mat circles = new Mat();
+            Imgproc.HoughCircles(roi, circles, Imgproc.HOUGH_GRADIENT, 1.3, 20, 100, 20, 30, 38);
+
+            List<Circle> detectedCircles = new ArrayList<>();
+            
+            for (int i = 0; i < circles.cols(); i++) {
+                double[] circle = circles.get(0, i);
+                int x = (int) circle[0] + rect.x;
+                int y = (int) circle[1] + rect.y;
+                int radius = (int) circle[2];
+
+                detectedCircles.add(new Circle(x, y, radius, false));
+            }
+
+            List<Circle> uniqueCircles = filterOverlappingCircles(detectedCircles);
+            
+            uniqueCircles.sort((c1, c2) -> {
+                if (Math.abs(c1.y - c2.y) > 20) {
+                    return Integer.compare(c1.y, c2.y);
+                }
+                return Integer.compare(c1.x, c2.x);
+            });
+            
+            char letter = 'A';
+            
+            for (Circle circle : uniqueCircles) {
+                
+                Point textPosition = new Point(circle.x - 10, circle.y + 10);
+                Imgproc.putText(original,String.valueOf(letter),textPosition,Imgproc.FONT_HERSHEY_SIMPLEX,0.5,new Scalar(0, 255, 0),1);
+                                
+                int squareSide = circle.radius * 2;
+                int squareX = circle.x - circle.radius;
+                int squareY = circle.y - circle.radius;
+
+                Rect squareCircle = new Rect(squareX, squareY, squareSide, squareSide);
+
+                Mat squareROI = cropped.submat(squareCircle);
+                
+                double fillPercentage = calculateFillPercentage(squareROI);
+                
+                if (fillPercentage >= 65.0) {
+                    DNIletters.add(String.valueOf(letter));
+                }
+                
+                letter++;
+                
+                Imgproc.rectangle(original, squareCircle.tl(), squareCircle.br(), new Scalar(255, 255, 0), 2);
+
+                Imgproc.circle(original, new Point(circle.x, circle.y), circle.radius, new Scalar(0, 0, 255), 2);
+            }
+        }
+        
+        List<Rect> numbersRectangle = new ArrayList<>();
+        
+        numbersRectangle.add(rectangles.get(1));
+        
+        int number = 0;
+        
+        for (Rect rect : numbersRectangle) {
+
+            Mat roi = cropped.submat(rect);
+
+            Mat circles = new Mat();
+            Imgproc.HoughCircles(roi, circles, Imgproc.HOUGH_GRADIENT, 1.3, 20, 100, 20, 30, 38);
+
+            List<Circle> detectedCircles = new ArrayList<>();
+            
+            for (int i = 0; i < circles.cols(); i++) {
+                double[] circle = circles.get(0, i);
+                int x = (int) circle[0] + rect.x;
+                int y = (int) circle[1] + rect.y;
+                int radius = (int) circle[2];
+
+                detectedCircles.add(new Circle(x, y, radius, false));
+                
+            }
+
+            List<Circle> uniqueCircles = filterOverlappingCircles(detectedCircles);
+                        
+            uniqueCircles.sort((c1, c2) -> {
+                if (Math.abs(c1.x - c2.x) > 20) {
+                    return Integer.compare(c1.x, c2.x);
+                }
+                return Integer.compare(c1.y, c2.y);
+            });
+            
+            
+            
+            for (Circle circle : uniqueCircles) {
+                
+                Point textPosition = new Point(circle.x - 10, circle.y + 10);
+                Imgproc.putText(original,String.valueOf(number),textPosition,Imgproc.FONT_HERSHEY_SIMPLEX,0.5,new Scalar(0, 255, 0),1);
+                                
+                int squareSide = circle.radius * 2;
+                int squareX = circle.x - circle.radius;
+                int squareY = circle.y - circle.radius;
+
+                Rect squareCircle = new Rect(squareX, squareY, squareSide, squareSide);
+                Mat squareROI = cropped.submat(squareCircle);
+                
+                double fillPercentage = calculateFillPercentage(squareROI);
+                                
+                if (fillPercentage >= 65.0) {
+                    String intToString = String.valueOf(number % 10);
+                    DNInumbers.add(intToString);
+                }
+                
+                number++;
+                
+                Imgproc.rectangle(original, squareCircle.tl(), squareCircle.br(), new Scalar(255, 255, 0), 2);
+
+                Imgproc.circle(original, new Point(circle.x, circle.y), circle.radius, new Scalar(0, 0, 255), 2);
+            }
+        }
+        
+        for (String dniLetter : DNIletters) {
+            System.out.println(dniLetter);
+        }
+        
+        for (String dniNumber : DNInumbers) {
+            System.out.println(dniNumber);
+        }
+        
+        System.out.println();
+    }
     
+    
+    private void examCodeDetection(Mat cropped, Mat original) {
+        List<MatOfPoint> contours = new ArrayList<>();
+        ArrayList<String> examCodes = new ArrayList<>();
+        
+        Mat hierarchy = new Mat();
+
+        Imgproc.findContours(cropped, contours, hierarchy, Imgproc.RETR_TREE, Imgproc.CHAIN_APPROX_SIMPLE);
+
+        List<Rect> rectangles = contours.stream()
+            .map(Imgproc::boundingRect)
+            .filter(rect -> rect.width < rect.height)
+            .sorted((r1, r2) -> Integer.compare(r2.width * r2.height, r1.width * r1.height))
+            .limit(1)
+            .sorted(Comparator.comparingInt(r -> r.x))
+            .collect(Collectors.toList());
+        
+        Rect rect = rectangles.get(0);
+        Imgproc.rectangle(original, rect.tl(), rect.br(), new Scalar(255, 0, 255), 2);
+                
+        int number = 0;
+
+            Mat roi = cropped.submat(rectangles.get(0));
+
+            Mat circles = new Mat();
+            Imgproc.HoughCircles(roi, circles, Imgproc.HOUGH_GRADIENT, 1.3, 20, 100, 20, 30, 38);
+
+            List<Circle> detectedCircles = new ArrayList<>();
+            
+            for (int i = 0; i < circles.cols(); i++) {
+                double[] circle = circles.get(0, i);
+                int x = (int) circle[0] + rect.x;
+                int y = (int) circle[1] + rect.y;
+                int radius = (int) circle[2];
+
+                detectedCircles.add(new Circle(x, y, radius, false));
+                
+            }
+
+            List<Circle> uniqueCircles = filterOverlappingCircles(detectedCircles);
+                        
+            uniqueCircles.sort((c1, c2) -> {
+                if (Math.abs(c1.x - c2.x) > 20) {
+                    return Integer.compare(c1.x, c2.x);
+                }
+                return Integer.compare(c1.y, c2.y);
+            });
+            
+            for (Circle circle : uniqueCircles) {
+                
+                Point textPosition = new Point(circle.x - 10, circle.y + 10);
+                Imgproc.putText(original,String.valueOf(number),textPosition,Imgproc.FONT_HERSHEY_SIMPLEX,0.5,new Scalar(0, 255, 0),1);
+                                
+                int squareSide = circle.radius * 2;
+                int squareX = circle.x - circle.radius;
+                int squareY = circle.y - circle.radius;
+
+                Rect squareCircle = new Rect(squareX, squareY, squareSide, squareSide);
+                Mat squareROI = cropped.submat(squareCircle);
+                
+                double fillPercentage = calculateFillPercentage(squareROI);
+                                
+                if (fillPercentage >= 65.0) {
+                    String intToString = String.valueOf(number % 10);
+                    examCodes.add(intToString);
+                }
+                
+                number++;
+                
+                Imgproc.rectangle(original, squareCircle.tl(), squareCircle.br(), new Scalar(255, 255, 0), 2);
+
+                Imgproc.circle(original, new Point(circle.x, circle.y), circle.radius, new Scalar(0, 0, 255), 2);
+            }
+        
+        for (String examCode : examCodes) {
+            System.out.println(examCode);
+        }
     }
     
     public static Object[][] addAnswer(Object[][] original, Object[] newAnswer) {
-        // Crear un nuevo arreglo con espacio para el nuevo elemento
         Object[][] newArray = Arrays.copyOf(original, original.length + 1);
-        // Agregar el nuevo elemento al final
+        
         newArray[original.length] = newAnswer;
+        
         return newArray;
     }
     
