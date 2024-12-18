@@ -21,6 +21,13 @@ public class TextScan {
     private void rectDetection() {
         Mat original = Imgcodecs.imread("images/capturaReal3.png");
 
+        int nuevaAncho = 3024;
+        int nuevaAlto = 4032;
+        Mat resizedImage = new Mat();
+        Imgproc.resize(original, resizedImage, new Size(nuevaAncho, nuevaAlto));
+
+        original = resizedImage;
+        
         Mat gray = new Mat();
         Imgproc.cvtColor(original, gray, Imgproc.COLOR_BGR2GRAY);
 
